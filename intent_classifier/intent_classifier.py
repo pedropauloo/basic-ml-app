@@ -11,6 +11,8 @@ classifier.predict(input_text="oi")
 ```
 Or, or you can use it as a CLI tool, you can do:
 ```
+cd intent_classifier
+
 python intent_classifier.py train \
     --config="models/confusion-v1_config.yml" \
     --examples_file="data/confusion_intents.yml" \
@@ -18,9 +20,8 @@ python intent_classifier.py train \
 
 python intent_classifier.py predict \
     --load_model="models/confusion-v1.keras" \
-    --input_text="oi"
+    --input_text="teste"
     
-python intent_classifier.py cross_validation --n_splits=5
 ```
 """
 # instalar alguns pacotes auxiliares
