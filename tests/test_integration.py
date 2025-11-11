@@ -15,7 +15,7 @@ MONGO_DB_NAME = os.getenv("MONGO_DB")
 LOG_COLLECTION_NAME = "PROD_intent_logs" 
 @pytest.fixture(scope="module")
 def db_connection():
-     if not MONGO_URI or not MONGO_DB_NAME:
+    if not MONGO_URI or not MONGO_DB_NAME:
         pytest.skip("MONGO_URI/MONGO_DB não definidos. Pulando testes de integração.")
     
     try:
@@ -31,7 +31,7 @@ def db_connection():
 
 
 def test_predict_integration_saves_to_db(db_connection, mocker):
-       if not VALID_TOKEN:
+      if not VALID_TOKEN:
         pytest.skip("Secret VALID_TEST_TOKEN is not set. Skipping integration test.")
 
         from app.app import app
