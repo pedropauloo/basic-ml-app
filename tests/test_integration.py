@@ -25,7 +25,7 @@ def db_connection():
         pytest.skip(f"Não foi possível conectar ao MongoDB Atlas: {e}")
 
     yield db 
-        print(f"\n[Teardown] Limpando coleção {LOG_COLLECTION_NAME}...")
+    print(f"\n[Teardown] Limpando coleção {LOG_COLLECTION_NAME}...")
     db[LOG_COLLECTION_NAME].delete_many({})
     client.close()
 
@@ -35,14 +35,14 @@ def test_predict_integration_saves_to_db(db_connection, mocker):
         pytest.skip("Secret VALID_TEST_TOKEN is not set. Skipping integration test.")
 
         from app.app import app
-    client = TestClient(app)
+        client = TestClient(app)
     
-    logs_collection = db_connection[LOG_COLLECTION_NAME]
+        logs_collection = db_connection[LOG_COLLECTION_NAME]
 
         logs_collection.delete_many({})
-    assert logs_collection.count_documents({}) == 0
+        assert logs_collection.count_documents({}) == 0
     
-    input_text = "qual o status do meu pedido de integração?"
+        input_text = "qual o status do meu pedido de integração?"
 
         response = client.post(
         "/predict",
@@ -52,12 +52,12 @@ def test_predict_integration_saves_to_db(db_connection, mocker):
 
         assert response.status_code == 200
     
-    data = response.json()
-    assert data["text"] == input_text
-    assert "id" in data 
+        data = response.json()
+        assert data["text"] == input_text
+        assert "id" in data 
 
         assert logs_collection.count_documents({}) == 1
-    saved_doc = logs_collection.find_one()
-    assert saved_doc is not None
-    assert saved_doc["text"] == input_text
-    assert "predictions" in saved_doc
+        saved_doc = logs_collection.find_one()
+        assert saved_doc is not None
+        assert saved_doc["text"] == input_text
+        assert "predictions" in saved_doc
