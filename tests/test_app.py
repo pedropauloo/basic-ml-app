@@ -25,6 +25,8 @@ def test_read_root():
 def test_predict_dev_mode_success(mocker):
     """Testa o /predict em modo 'dev', pulando auth e mockando o DB."""
 
+    mocker.patch('app.app.ENV', 'dev')
+    
     def mock_insert_one_side_effect(document_to_insert):
         """Simula o pymongo adicionando um _id ao documento."""
         document_to_insert["_id"] = "fake_mongo_id_12345"

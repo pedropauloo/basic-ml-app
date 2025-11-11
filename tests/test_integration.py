@@ -1,83 +1,63 @@
 import sys
 import os
+import pytest
+import pymongo
+from dotenv import load_dotenv
+from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-import pytest
-from fastapi.testclient import TestClient
-from unittest.mock import MagicMock
+load_dotenv()
 
-try:
-    from app.app import app
-except Exception as e:
-    print(f"Aviso ao importar app.app (pode ser esperado): {e}")
-    pass
+VALID_TOKEN = os.getenv("VALID_TEST_TOKEN")
+MONGO_URI = os.getenv("MONGO_URI")
+MONGO_DB_NAME = os.getenv("MONGO_DB")
+LOG_COLLECTION_NAME = "PROD_intent_logs" 
+@pytest.fixture(scope="module")
+def db_connection():
+     if not MONGO_URI or not MONGO_DB_NAME:
+        pytest.skip("MONGO_URI/MONGO_DB não definidos. Pulando testes de integração.")
+    
+    try:
+        client = pymongo.MongoClient(MONGO_URI)
+        db = client[MONGO_DB_NAME]
+    except Exception as e:
+        pytest.skip(f"Não foi possível conectar ao MongoDB Atlas: {e}")
 
-client = TestClient(app)
-
-def test_read_root():
-    response = client.get("/")
-    assert response.status_code == 200
-    assert "message" in response.json()
+    yield db 
+        print(f"\n[Teardown] Limpando coleção {LOG_COLLECTION_NAME}...")
+    db[LOG_COLLECTION_NAME].delete_many({})
+    client.close()
 
 
-def test_predict_dev_mode_success(mocker):
-    """Testa o /predict em modo 'dev', pulando auth e mockando o DB."""
+def test_predict_integration_saves_to_db(db_connection, mocker):
+       if not VALID_TOKEN:
+        pytest.skip("Secret VALID_TEST_TOKEN is not set. Skipping integration test.")
 
-    def mock_insert_one_side_effect(document_to_insert):
-        document_to_insert["_id"] = "fake_mongo_id_12345"
-        return MagicMock(inserted_id="fake_mongo_id_12345")
+        from app.app import app
+    client = TestClient(app)
+    
+    logs_collection = db_connection[LOG_COLLECTION_NAME]
 
-    mock_collection = MagicMock()
-    mock_collection.insert_one.side_effect = mock_insert_one_side_effect
-    mocker.patch('app.app.collection', mock_collection)
+        logs_collection.delete_many({})
+    assert logs_collection.count_documents({}) == 0
+    
+    input_text = "qual o status do meu pedido de integração?"
 
-    mock_model = MagicMock()
-    mock_model.predict.return_value = ("intent_falsa", {"intent_falsa": 1.0})
-    mocker.patch.dict('app.app.MODELS', {'modelo_falso': mock_model})
-
-    response = client.post(
+        response = client.post(
         "/predict",
-        json={"text": "Oi, tudo bem?"}
+        json={"text": input_text},
+        headers={"Authorization": f"Bearer {VALID_TOKEN}"}
     )
 
-    # Verifica os resultados
-    assert response.status_code == 200
+        assert response.status_code == 200
+    
     data = response.json()
-    assert data["owner"] == "dev_user"
-    assert data["text"] == "Oi, tudo bem?"
-    assert data["id"] == "fake_mongo_id_12345"
-    mock_collection.insert_one.assert_called_once()
+    assert data["text"] == input_text
+    assert "id" in data 
 
-
-def test_predict_prod_mode_auth_failure(mocker):
-    """Testa /predict em modo 'prod' sem token (deve falhar 401)."""
-
-    mocker.patch('app.app.ENV', 'prod')
-
-    response = client.post(
-        "/predict",
-        json={"text": "Oi, tudo bem?"}
-    )
-
-    assert response.status_code == 401
-    assert "Missing Authorization header" in response.json().get("detail", "")
-
-
-def test_predict_prod_mode_auth_invalid_token(mocker):
-    """Testa /predict em 'prod' com token inválido (deve falhar 403)."""
-
-    mocker.patch('app.app.ENV', 'prod')
-
-    mock_tokens_collection = MagicMock()
-    mock_tokens_collection.find_one.return_value = None
-    mocker.patch('app.auth.get_mongo_collection', return_value=mock_tokens_collection)
-
-    response = client.post(
-        "/predict",
-        json={"text": "Oi, tudo bem?"},
-        headers={"Authorization": "Bearer token_falso_que_nao_existe"}
-    )
-
-    assert response.status_code == 403
-    assert "Invalid or inactive token" in response.json().get("detail", "")
+        assert logs_collection.count_documents({}) == 1
+    saved_doc = logs_collection.find_one()
+    assert saved_doc is not None
+    assert saved_doc["text"] == input_text
+    assert "predictions" in saved_doc
