@@ -13,6 +13,11 @@ from intent_classifier import IntentClassifier
 from db.engine import get_mongo_collection
 from app.auth import verify_token
 
+from pydantic import BaseModel
+
+class PredictRequest(BaseModel):
+    text: str
+
 logger = logging.getLogger(__name__)
 
 # Load environment variables from .env file
@@ -49,11 +54,12 @@ try:
     collection = get_mongo_collection(f"{ENV.upper()}_intent_logs")
     logger.info("Database connection established")
 except Exception as e:
+    collection = None
     logger.error(f"Failed to connect to database: {str(e)}")
     logger.error(traceback.format_exc())
 
 
-async def conditional_auth():
+async def conditional_auth(request: Request):
     """Returns user based on environment mode"""
     global ENV
     if ENV == "dev":
@@ -61,11 +67,12 @@ async def conditional_auth():
         return "dev_user"
     else:
         try:
-            return await verify_token()
-        except Exception as e:
+            return verify_token(request)
+        except HTTPException as http_err: 
+            raise http_err                 
+        except Exception as e:             
             logger.error(f"Authentication failed: {str(e)}")
             raise HTTPException(status_code=401, detail="Authentication failed")
-
 
 # Load models
 MODELS = {}
@@ -89,12 +96,13 @@ Routes
 
 @app.get("/")
 async def root():
-    return {"message": "Basic ML App is running in {ENV} mode"}
+    return {"message": f"Basic ML App is running in {ENV} mode"}
 
 
 @app.post("/predict")
-async def predict(text: str, owner: str = Depends(conditional_auth)):
-    # Generate predictions
+async def predict(request_data: PredictRequest, owner: str = Depends(conditional_auth)):
+    text = request_data.text 
+
     predictions = {}
     for model_name, model in MODELS.items():
         top_intent, all_probs = model.predict(text)
