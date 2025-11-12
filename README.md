@@ -54,7 +54,7 @@ Acompanhe abaixo a linha temporal das alterações realizadas até o momento:
 
 
 > _______________
-> ### 5️⃣ : ...
+> ### 5️⃣ : Readequação ao padrão MVC (Model, View, Controller)
 >
 > **Tópicos abordados:**
 > *   ...
