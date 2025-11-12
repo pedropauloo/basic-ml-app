@@ -36,6 +36,7 @@ import os
 import sys
 import pytest
 from unittest.mock import MagicMock
+from dotenv import load_dotenv
 
 # --- Configuração do Path ---
 # Este é um passo crucial. Adicionamos o diretório raiz do projeto (um nível acima de 'tests')
@@ -300,18 +301,26 @@ def test_integration_real_model_predict(client, monkeypatch, mock_app_dependenci
     - *Removemos* o mock do dict MODELS e carregamos o real.
     """
     print("\n[Teste de Integração] Rodando: POST /predict (Usando modelo REAL)")
+
+    load_dotenv() # Garante que o .env local seja lido (para seu PC)
+    if not os.getenv("WANDB_API_KEY"):
+        print("  > PULANDO: WANDB_API_KEY não configurada no ambiente.")
+        pytest.skip("PULANDO teste de integração: WANDB_API_KEY não configurada.")
     
     monkeypatch.setattr("app.app.ENV", "dev") # Mantém auth mockada
     
     # 1. Encontra o arquivo do modelo real
-    real_model_path = os.path.abspath(os.path.join(
-        os.path.dirname(__file__), "..", "intent_classifier", "models", "confusion-v1.keras"
-    ))
+    if os.getenv("WANDB_MODEL_URL"):
+        real_model_path = os.getenv("WANDB_MODEL_URL")
+    else:
+        real_model_path = os.path.abspath(os.path.join(
+            os.path.dirname(__file__), "..", "intent_classifier", "models", "confusion-v1.keras"
+        ))
     
     print(f"  > Carregando modelo real de: {real_model_path}")
     if not os.path.exists(real_model_path):
-        print("  > PULANDO: Arquivo do modelo real 'confusion-v1.keras' não encontrado.")
-        pytest.skip("Pulando teste do modelo real: confusion-v1.keras não encontrado")
+        print("  > PULANDO: Modelo não encontrado.")
+        pytest.skip("Pulando teste do modelo: modelo não encontrado")
         
     # 2. Carrega o modelo real
     try:
@@ -320,7 +329,7 @@ def test_integration_real_model_predict(client, monkeypatch, mock_app_dependenci
         print(f"  > FALHOU: Não foi possível carregar o modelo real. Erro: {e}")
         pytest.fail(f"Falha ao carregar modelo real de {real_model_path}: {e}")
         
-    # 3. Desfaz o mock de 'MODELS' substituindo-o pelo modelo real
+    # 3. Desfaz o mock da variável global 'MODELS' substituindo-o pelo modelo real
     print("  > Injetando modelo real em 'app.app.MODELS'")
     monkeypatch.setattr("app.app.MODELS", {"confusion-v1": real_model})
     
