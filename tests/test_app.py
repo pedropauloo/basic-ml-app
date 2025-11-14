@@ -3,7 +3,7 @@ Testes Unitários para a Aplicação FastAPI (app/app.py).
 
 Destaques da Cobertura de Testes:
 
-1.  **Mocking de Dependências:**
+1.  Mocking de Dependências:
     - Usa `pytest.fixture` e `monkeypatch` para automaticamente "mockar" (simular)
       e substituir todas as dependências externas:
         - `app.app.collection` (Banco de dados MongoDB)
@@ -12,11 +12,11 @@ Destaques da Cobertura de Testes:
     - Isso isola a lógica dos endpoints da aplicação para testes rápidos
       e previsíveis.
 
-2.  **Lógica de Ambiente (ENV):**
+2.  Lógica de Ambiente (ENV):
     - Testa o comportamento dos endpoints (`/` e `/predict`) quando a
       variável global `ENV` é definida como "dev" vs. "prod".
 
-3.  **Fluxo de Autenticação (conditional_auth):**
+3.  Fluxo de Autenticação (conditional_auth):
     - `test_predict_dev_mode`: Verifica se a autenticação é contornada
       corretamente.
     - `test_predict_prod_mode_auth_success`: Verifica o "caminho feliz" onde
@@ -25,9 +25,9 @@ Destaques da Cobertura de Testes:
       a autenticação falha, um 401 é retornado, e *crucialmente*, o modelo
       de ML e o banco de dados *não* são chamados.
 
-4.  **Integração com Modelo Real (Teste de Integração):**
+4.  Integração com Modelo Real (Teste de Integração):
     - Inclui um teste (`@pytest.mark.integration`) que carrega o modelo
-      *real* `confusion-v1.keras` para garantir que ele é compatível
+      *real* `confusion.keras` para garantir que ele é compatível
       com o código da aplicação. Este teste é pulado por padrão
       em uma execução normal do `pytest` (execute com `pytest -m "integration"`).
 """
@@ -51,6 +51,14 @@ from fastapi import HTTPException
 from app.app import app
 from intent_classifier import IntentClassifier
 
+# --- Constantes de Arquivos de Teste ---
+# Caminhos para os arquivos do modelo e config usados nos testes de integração
+TEST_MODELS_DIR = os.path.abspath(os.path.join(
+    os.path.dirname(__file__), "..", "intent_classifier", "models"
+))
+CONFUSION_MODEL_PATH = os.path.join(TEST_MODELS_DIR, "confusion.keras")
+CONFUSION_CONFIG_PATH = os.path.join(TEST_MODELS_DIR, "confusion_config.yml")
+
 # --- Fixtures ---
 # Fixtures são funções reutilizáveis de setup/teardown para testes.
 
@@ -67,9 +75,9 @@ def mock_app_dependencies(monkeypatch):
     
     # 1. Mock da Coleção do MongoDB
     # Substituímos o objeto 'collection' real em 'app.app' por um mock.
-    print("  > Mockando: app.app.collection (MongoDB)")
-    mock_collection = MagicMock()
-    monkeypatch.setattr("app.app.collection", mock_collection)
+    print("  > Mockando: app.services.load_all_models (Modelos de ML)")
+    mock_models = MagicMock()
+    monkeypatch.setattr("app.services.load_all_models", mock_models)
 
     # 2. Mock do(s) Modelo(s) de ML
     # Criamos um 'IntentClassifier' mockado e configuramos seu método 'predict'
@@ -88,6 +96,10 @@ def mock_app_dependencies(monkeypatch):
     print("  > Mockando: app.app.verify_token (Auth)")
     mock_verify_token = MagicMock(return_value="mock_prod_user")
     monkeypatch.setattr("app.app.verify_token", mock_verify_token)
+    
+    # 4. Mock da Coleção do MongoDB (se necessário)
+    mock_collection = MagicMock()
+    mock_collection.insert_one = MagicMock()
     
     print("--- [Setup da Fixture Completo] ---")
 
@@ -287,6 +299,99 @@ def test_predict_no_models_loaded(client, monkeypatch, mock_app_dependencies):
     
     print("[Teste] Passou: POST /predict (Nenhum Modelo Carregado)")
 
+def test_model_config_category_mismatch(monkeypatch):
+    """
+    Teste 5.1: Verifica o comportamento quando o modelo tem um número diferente
+    de categorias de saída do que está especificado em config.codes.
+    
+    Este é um cenário crítico que indica um modelo inválido ou config incorreto.
+    O IntentClassifier deve detectar essa incompatibilidade durante a inicialização
+    e fornecer uma mensagem de erro clara sugerindo verificar o arquivo de config
+    e treinar um novo modelo.
+    """
+    print("\n[Teste] Rodando: IntentClassifier (Mismatch Model-Config Categories)")
+    
+    # Cria um mock de modelo Keras com output size diferente do config
+    from unittest.mock import Mock, MagicMock
+    import tensorflow as tf
+    
+    # Simula um modelo que foi treinado com 5 categorias
+    mock_model = MagicMock()
+    mock_model.output_shape = (None, 5)  # Modelo tem 5 classes de saída
+    
+    # Cria um mock de config com apenas 3 categorias (mismatch!)
+    mock_config_obj = MagicMock()
+    mock_config_obj.codes = ["intent1", "intent2", "intent3"]  # 3 categorias
+    mock_config_obj.stop_words_file = None
+    mock_config_obj.dataset_name = "test"
+    mock_config_obj.architecture = "v0.1.5"
+    mock_config_obj.task = "predict"
+    mock_config_obj.min_words = 1
+    mock_config_obj.embedding_model = 'https://www.kaggle.com/models/google/universal-sentence-encoder/tensorFlow2/multilingual/2'
+    mock_config_obj.sent_hl_units = 32
+    mock_config_obj.sent_dropout = 0.1
+    mock_config_obj.l1_reg = 0.01
+    mock_config_obj.l2_reg = 0.01
+    mock_config_obj.epochs = 500
+    mock_config_obj.callback_patience = 20
+    mock_config_obj.learning_rate = 5e-3
+    mock_config_obj.validation_split = 0.2
+    
+    # Mocka tf.keras.models.load_model para retornar nosso modelo mockado
+    def mock_load_model(path):
+        return mock_model
+    
+    monkeypatch.setattr("tensorflow.keras.models.load_model", mock_load_model)
+    
+    # Mocka fetch_model_from_wandb para retornar um path fake
+    def mock_fetch_model(url):
+        return "/fake/model/path.keras"
+    
+    monkeypatch.setattr("intent_classifier.fetch_model_from_wandb", mock_fetch_model)
+    
+    # Mocka wandb para evitar inicialização real
+    monkeypatch.setattr("intent_classifier.wandb.login", MagicMock())
+    monkeypatch.setattr("intent_classifier.wandb.init", MagicMock())
+    
+    # Tenta inicializar IntentClassifier com mismatch
+    # Isso deve lançar ValueError durante a validação
+    print("  > Tentando inicializar IntentClassifier com modelo-config mismatch...")
+    
+    with pytest.raises(ValueError) as exc_info:
+        # Cria um Config object com 3 categorias
+        from intent_classifier import Config
+        config = Config(
+            dataset_name="test",
+            codes=["intent1", "intent2", "intent3"],  # 3 categorias
+            stop_words_file=None
+        )
+        
+        # Tenta carregar um modelo (que tem 5 categorias)
+        classifier = IntentClassifier(
+            config=config,
+            load_model="/fake/model/path.keras"  # Modelo mockado tem 5 categorias
+        )
+    
+    # Verifica que o erro foi lançado com a mensagem correta
+    error_message = str(exc_info.value)
+    print(f"  > Erro capturado: {error_message[:150]}...")
+    
+    # Verifica que a mensagem de erro contém informações importantes
+    assert "Model-config mismatch detected" in error_message
+    assert "5 categories" in error_message or "5" in error_message
+    assert "3 categories" in error_message or "3" in error_message
+    assert "config file" in error_message.lower() or "config" in error_message.lower()
+    assert "train" in error_message.lower()
+    assert "intent_classifier.py train" in error_message or "train" in error_message
+    
+    print("  > Mensagem de erro contém todas as informações necessárias:")
+    print("    - Detecta o mismatch entre modelo e config")
+    print("    - Indica o número de categorias em cada um")
+    print("    - Sugere verificar o config file")
+    print("    - Fornece instruções para treinar um novo modelo")
+    
+    print("[Teste] Passou: IntentClassifier (Mismatch Model-Config Categories)")
+
 # --- Testes de Integração ---
 # Estes testes são marcados com '@pytest.mark.integration'
 # Eles podem ser pulados rodando: pytest -m "not integration"
@@ -295,7 +400,7 @@ def test_predict_no_models_loaded(client, monkeypatch, mock_app_dependencies):
 @pytest.mark.integration
 def test_integration_real_model_predict(client, monkeypatch, mock_app_dependencies):
     """
-    Teste de Integração 1: Testa o app com o modelo REAL 'confusion-v1'.
+    Teste de Integração 1: Testa o app com o modelo REAL 'confusion'.
     - *Mantemos* o mock para o banco de dados (collection).
     - *Mantemos* o mock para auth (definindo ENV=dev).
     - *Removemos* o mock do dict MODELS e carregamos o real.
@@ -313,9 +418,7 @@ def test_integration_real_model_predict(client, monkeypatch, mock_app_dependenci
     if os.getenv("WANDB_MODEL_URL"):
         real_model_path = os.getenv("WANDB_MODEL_URL")
     else:
-        real_model_path = os.path.abspath(os.path.join(
-            os.path.dirname(__file__), "..", "intent_classifier", "models", "confusion-v1.keras"
-        ))
+        real_model_path = CONFUSION_MODEL_PATH
     
     print(f"  > Carregando modelo real de: {real_model_path}")
     if not os.path.exists(real_model_path):
@@ -324,14 +427,15 @@ def test_integration_real_model_predict(client, monkeypatch, mock_app_dependenci
         
     # 2. Carrega o modelo real
     try:
-        real_model = IntentClassifier(load_model=real_model_path)
+        real_model = IntentClassifier(config=CONFUSION_CONFIG_PATH, 
+                                      load_model=real_model_path)
     except Exception as e:
         print(f"  > FALHOU: Não foi possível carregar o modelo real. Erro: {e}")
         pytest.fail(f"Falha ao carregar modelo real de {real_model_path}: {e}")
         
     # 3. Desfaz o mock da variável global 'MODELS' substituindo-o pelo modelo real
     print("  > Injetando modelo real em 'app.app.MODELS'")
-    monkeypatch.setattr("app.app.MODELS", {"confusion-v1": real_model})
+    monkeypatch.setattr("app.app.MODELS", {"confusion": real_model})
     
     # 4. Faz a requisição com um texto conhecido de "confusion"
     test_text = "wait what?"
@@ -345,8 +449,8 @@ def test_integration_real_model_predict(client, monkeypatch, mock_app_dependenci
     
     # Verifica se o modelo real produziu o output esperado
     print(f"  > Verificando se predição do modelo real é 'confusion'...")
-    assert "confusion-v1" in data["predictions"]
-    prediction = data["predictions"]["confusion-v1"]["top_intent"]
+    assert "confusion" in data["predictions"]
+    prediction = data["predictions"]["confusion"]["top_intent"]
     print(f"  > Modelo real predisse: '{prediction}'")
     assert prediction == "confusion"
     

@@ -46,16 +46,17 @@ app.add_middleware(
 )
 
 
-# Initialize models
+# Carregar modelos do W&B
 MODELS = {}
 try: 
-    logger.info("Loading models...")
-    MODELS = services.load_all_models()
-    logger.info("Models loaded successfully")
+    logger.info("Carregando modelos do W&B...")
+    assert os.getenv("WANDB_MODELS") is not None, "Variável de ambiente WANDB_MODELS não definida."
+    MODELS = services.load_all_classifiers(os.getenv("WANDB_MODELS"))
+    logger.info("Modelos do W&B carregados com sucesso")
 except Exception as e:
-    logger.error(f"Failed to load models: {str(e)}")
+    logger.error(f"Falha ao carregar modelos do W&B: {str(e)}")
     logger.error(traceback.format_exc())
-    raise Exception(f"Failed to load models: {str(e)}")
+    raise Exception(f"Falha ao carregar modelos do W&B: {str(e)}")
 
 
 """
@@ -69,23 +70,24 @@ async def root():
 async def predict(text: str, owner: str = Depends(conditional_auth)):
     """
     Endpoint de predição.
-    Este é um 'Controller' enxuto. Ele apenas delega.
+    Este é um 'Controller' enxuto. 
+    Ele apenas delega a lógica de negócio para o services.py.
     """
     try:
-        # 1. O Controller delega TODA a lógica de negócio para o Serviço
+        # 1. O Controller delega TODA a lógica de negócio para o services.py
         results = services.predict_and_log_intent(
             text=text, 
             owner=owner, 
             models=MODELS
         )
         
-        # 2. O Controller retorna a resposta (Lógica de View)
+        # 2. O Controller retorna a resposta (Lógica de View) no formato JSON
         return JSONResponse(content=results)
         
     except Exception as e:
-        logger.error(f"Erro na predição: {str(e)}")
+        logger.error(f"Erro ao processar a predição: {str(e)}")
         logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail="Erro interno ao processar a predição.")
+        raise HTTPException(status_code=500, detail=f"Erro interno ao processar a predição: {str(e)}")
 
 
 
